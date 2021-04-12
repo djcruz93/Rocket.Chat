@@ -16,7 +16,7 @@ import { goToRoomById } from '../../../client/lib/goToRoomById';
 class WebRTCTransportClass extends Emitter {
 	constructor(webrtcInstance) {
 		super();
-		this.debug = false;
+		this.debug = true;
 		this.webrtcInstance = webrtcInstance;
 		Notifications.onRoom(this.webrtcInstance.room, WEB_RTC_EVENTS.WEB_RTC, (type, data) => {
 			this.log('WebRTCTransportClass - onRoom', type, data);
@@ -119,7 +119,7 @@ class WebRTCClass {
 		this.config = {
 			iceServers: [],
 		};
-		this.debug = false;
+		this.debug = true;
 		this.TransportClass = WebRTCTransportClass;
 		this.selfId = selfId;
 		this.room = room;
@@ -147,7 +147,7 @@ class WebRTCClass {
 		this.callInProgress = new ReactiveVar(false);
 		this.audioEnabled = new ReactiveVar(true);
 		this.videoEnabled = new ReactiveVar(true);
-		this.overlayEnabled = new ReactiveVar(false);
+		this.overlayEnabled = new ReactiveVar(true);
 		this.screenShareEnabled = new ReactiveVar(false);
 		this.localUrl = new ReactiveVar();
 		this.active = false;
@@ -673,28 +673,29 @@ class WebRTCClass {
 			});
 			return;
 		}
-
-		const user = Meteor.users.findOne(data.from);
-		let fromUsername = undefined;
-		if (user && user.username) {
-			fromUsername = user.username;
-		}
 		const subscription = ChatSubscription.findOne({
 			rid: data.room,
 		});
-
 		let icon;
 		let title;
 		if (data.monitor === true) {
 			icon = 'eye';
-			title = t('WebRTC_monitor_call_from_%s', fromUsername);
+			title = t('WebRTC_monitor_call_from_%s', subscription.name);
+		} else if (subscription.t === 'l') {
+			if (data.media && data.media.video) {
+				icon = 'videocam';
+				title = t('WebRTC_direct_video_call_from_%s', subscription.fname);
+			} else {
+				icon = 'phone';
+				title = t('WebRTC_direct_audio_call_from_%s', subscription.fname);
+			}
 		} else if (subscription && subscription.t === 'd') {
 			if (data.media && data.media.video) {
 				icon = 'videocam';
-				title = t('WebRTC_direct_video_call_from_%s', fromUsername);
+				title = t('WebRTC_direct_video_call_from_%s', subscription.name);
 			} else {
 				icon = 'phone';
-				title = t('WebRTC_direct_audio_call_from_%s', fromUsername);
+				title = t('WebRTC_direct_audio_call_from_%s', subscription.name);
 			}
 		} else if (data.media && data.media.video) {
 			icon = 'videocam';
@@ -764,7 +765,7 @@ class WebRTCClass {
 		// needsVideo = data.media.video is true and peerConnection.remoteMedia.video isnt true
 		// needsRefresh = needsAudio or needsVideo or data.media.desktop isnt peerConnection.remoteMedia.desktop
 
-		// # if peerConnection.signalingState is "have-local-offer" or needsRefresh
+		// # if peerConnection.signalingState is 'have-local-offer' or needsRefresh
 
 		if (peerConnection.signalingState !== 'checking') {
 			this.stopPeerConnection(data.from);
@@ -931,6 +932,9 @@ const WebRTC = new class {
 				break;
 			case 'c':
 				enabled = settings.get('WebRTC_Enable_Channel');
+				break;
+			default:
+				enabled = true;
 		}
 		if (enabled === false) {
 			return;

@@ -5,6 +5,7 @@ import { SubscriptionsRaw } from '../../../app/models/server/raw/Subscriptions';
 import { ISubscription } from '../../../definition/ISubscription';
 import { UsersRaw } from '../../../app/models/server/raw/Users';
 import { SettingsRaw } from '../../../app/models/server/raw/Settings';
+import { default as LivechatVisitors } from '../../../app/models/server/models/LivechatVisitors';
 
 interface IModelsParam {
 	Rooms: RoomsRaw;
@@ -223,11 +224,23 @@ export class NotificationsModule {
 
 		this.streamRoomUsers.allowRead('none');
 		this.streamRoomUsers.allowWrite(async function(eventName, ...args) {
+			const [roomId, e] = eventName.split('/');
+
+			// Calling from livechat room
+			const room = await Rooms.findOneById(roomId, { projection: { t: 1, 'v._id': 1, 'servedBy._id': 1, 'v.token': 1 } });
+			if (room.t === 'l' && e === 'webrtc') {
+				if (this.userId && this.userId === room.servedBy._id) {
+					notifyUser(room.v._id, e, ...args);
+				} else if (args[2] && args[2].token && room.v.token === args[2].token) {
+					notifyUser(room.servedBy._id, e, ...args);
+				}
+				return false;
+			}
+
 			if (!this.userId) {
 				return false;
 			}
 
-			const [roomId, e] = eventName.split('/');
 			if (await Subscriptions.countByRoomIdAndUserId(roomId, this.userId) > 0) {
 				const subscriptions: ISubscription[] = await Subscriptions.findByRoomIdAndNotUserId(roomId, this.userId, { projection: { 'u._id': 1, _id: 0 } }).toArray();
 				subscriptions.forEach((subscription) => notifyUser(subscription.u._id, e, ...args));
@@ -235,9 +248,20 @@ export class NotificationsModule {
 			return false;
 		});
 
-		this.streamUser.allowWrite('logged');
-		this.streamUser.allowRead(async function(eventName) {
+		this.streamUser.allowWrite(async function(...args) {
+			// Allow only logged users
+			if (this.userId || (args[3] && args[3].token && await LivechatVisitors.getVisitorByToken(args[3].token, {}))) {
+				return true;
+			}
+			return false;
+		});
+		this.streamUser.allowRead(async function(eventName, extraData = {}) {
 			const [userId] = eventName.split('/');
+			// Calling from livechat widget
+			if (extraData?.token && extraData?.uid) {
+				const visitor = await LivechatVisitors.getVisitorByToken(extraData.token, { fields: { token: 1 } });
+				return visitor && visitor.token === extraData.token && visitor._id === extraData.uid;
+			}
 			return (this.userId != null) && this.userId === userId;
 		});
 
@@ -275,7 +299,7 @@ export class NotificationsModule {
 			const room = await Rooms.findOneById(roomId, { projection: { _id: 0, t: 1, v: 1 } });
 
 			if (!room) {
-				console.warn(`Invalid eventName: "${ roomId }"`);
+				console.warn(`Invalid eventName: '${ roomId }'`);
 				return false;
 			}
 
